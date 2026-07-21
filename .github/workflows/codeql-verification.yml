@@ -1,0 +1,164 @@
+name: CodeQL verification
+
+on:
+  push:
+    branches:
+      - 'verification/usage-telemetry-agent-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: usage-telemetry-agent-codeql-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build_mode: manual
+          - language: python
+            build_mode: none
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify candidate shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          test "$(git rev-list --count 83df963051f33520dda867e6e882afa277b62cbc..HEAD)" -eq 1
+
+      - name: Install checksum-pinned Go toolchain
+        if: matrix.language == 'go'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/go1.26.6.linux-amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            'https://go.dev/dl/go1.26.6.linux-amd64.tar.gz'
+          printf '%s  %s\n' \
+            '708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89' \
+            "$archive" | sha256sum --check
+          tar -C "$RUNNER_TEMP" -xzf "$archive"
+          "$RUNNER_TEMP/go/bin/go" version
+          printf '%s\n' "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+          printf 'GOROOT=%s\n' "$RUNNER_TEMP/go" >> "$GITHUB_ENV"
+
+      - name: Install exact Python toolchain
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+
+      - name: Verify Python toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(python3 --version)" = 'Python 3.14.6'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+          config: |
+            queries:
+              - uses: security-extended
+            threat-models: local
+
+      - name: Build Go source
+        if: matrix.language == 'go'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOTOOLCHAIN=local
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o "$RUNNER_TEMP/usage-telemetry-agent" ./
+
+      - name: Run Python fixture regression
+        if: matrix.language == 'python'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v integration.test_fixture_api
+
+      - name: Analyze without publishing temporary alerts
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          category: /language:${{ matrix.language }}
+          upload: never
+          output: codeql-results
+
+      - name: Reject Critical and High findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import json
+
+          blocked = []
+          unresolved = []
+          total = 0
+          for path in glob.glob('codeql-results/**/*.sarif', recursive=True):
+              with open(path, encoding='utf-8') as stream:
+                  sarif = json.load(stream)
+              for run in sarif.get('runs', []):
+                  rules = {
+                      rule.get('id'): rule
+                      for rule in run.get('tool', {}).get('driver', {}).get('rules', [])
+                  }
+                  for extension in run.get('tool', {}).get('extensions', []):
+                      rules.update({rule.get('id'): rule for rule in extension.get('rules', [])})
+                  for result in run.get('results', []):
+                      total += 1
+                      rule_id = result.get('ruleId')
+                      rule = rules.get(rule_id)
+                      if rule is None:
+                          unresolved.append((rule_id, 'missing rule metadata'))
+                          continue
+                      try:
+                          score = float(rule.get('properties', {}).get('security-severity', '0'))
+                      except (TypeError, ValueError):
+                          unresolved.append((rule_id, 'invalid security severity'))
+                          continue
+                      if score >= 7.0:
+                          location = result.get('locations', [{}])[0].get('physicalLocation', {})
+                          blocked.append((
+                              rule_id,
+                              score,
+                              location.get('artifactLocation', {}).get('uri', 'unknown'),
+                              location.get('region', {}).get('startLine', 0),
+                          ))
+          print(f'codeql_total={total}')
+          print(f'codeql_critical_high={len(blocked)}')
+          print(f'codeql_unresolved_rule_metadata={len(unresolved)}')
+          for finding in blocked:
+              print(f'{finding[0]}\t{finding[1]}\t{finding[2]}:{finding[3]}')
+          for finding in unresolved:
+              print(f'{finding[0]}\t{finding[1]}')
+          if blocked or unresolved:
+              raise SystemExit(1)
+          PY
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: usage-telemetry-agent-codeql-${{ matrix.language }}-${{ github.sha }}
+          path: codeql-results/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9

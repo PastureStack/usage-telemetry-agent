@@ -1,12 +1,24 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# PastureStack static, deterministic Go build.
+set -euo pipefail
 
-source $(dirname $0)/version
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "${repo_root}/scripts/version"
+source "${repo_root}/scripts/toolchain"
 
-cd $(dirname $0)/..
+go_version="$(GOTOOLCHAIN=local go env GOVERSION)"
+if [[ "${go_version}" != "go${GO_VERSION}" ]]; then
+    printf 'Go %s is required; found %s\n' "${GO_VERSION}" "${go_version}" >&2
+    exit 1
+fi
 
-mkdir -p bin
-[ "$(uname)" != "Darwin" ] && LINKFLAGS="-extldflags -static -s"
-CGO_ENABLED=0 go build -ldflags "-X main.VERSION=$VERSION $LINKFLAGS" -o bin/telemetry-${ARCH}
-
-./bin/telemetry-${ARCH} --version  # ensure binary works or fail
+mkdir -p "${repo_root}/bin"
+(
+    cd "${repo_root}"
+    GOTOOLCHAIN=local CGO_ENABLED=0 go build \
+        -trimpath \
+        -buildvcs=false \
+        -tags "netgo osusergo" \
+        -ldflags "-buildid= -s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -o "${repo_root}/bin/usage-telemetry-agent" .
+)

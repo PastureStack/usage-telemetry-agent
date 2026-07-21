@@ -1,0 +1,251 @@
+name: Security release gate
+
+on:
+  push:
+    branches:
+      - main
+      - 'verification/usage-telemetry-agent-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: usage-telemetry-agent-security-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Test, integrate, scan, and inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CANDIDATE_VERSION: 0.4.1
+      TRIVY_IMAGE: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
+      TRIVY_CACHE: /tmp/pasturestack-usage-telemetry-trivy-cache
+    steps:
+      - name: Check out the complete source history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the exact source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-list --count 83df963051f33520dda867e6e882afa277b62cbc..HEAD)" -eq 1
+          mkdir -p dist
+          printf '%s\n' "$GITHUB_SHA" > dist/source-revision.txt
+          docker version
+
+      - name: Install checksum-pinned Go toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/go1.26.6.linux-amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            'https://go.dev/dl/go1.26.6.linux-amd64.tar.gz'
+          printf '%s  %s\n' \
+            '708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89' \
+            "$archive" | sha256sum --check
+          tar -C "$RUNNER_TEMP" -xzf "$archive"
+          "$RUNNER_TEMP/go/bin/go" version
+          printf '%s\n' "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+          printf 'GOROOT=%s\n' "$RUNNER_TEMP/go" >> "$GITHUB_ENV"
+
+      - name: Install exact Python toolchain
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          check-latest: false
+
+      - name: Verify, test, and integrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOTOOLCHAIN=local
+          export VERSION_OVERRIDE="$CANDIDATE_VERSION"
+          export COMMIT_OVERRIDE="$GITHUB_SHA"
+          test "$(go env GOVERSION)" = 'go1.26.6'
+          test "$(python3 --version)" = 'Python 3.14.6'
+          make validate
+          make test
+          make build
+          cp bin/usage-telemetry-agent dist/usage-telemetry-agent.first
+          make build
+          cmp dist/usage-telemetry-agent.first bin/usage-telemetry-agent
+          mv dist/usage-telemetry-agent.first dist/usage-telemetry-agent
+          make integration-test
+          go version -m dist/usage-telemetry-agent > dist/go-version.txt
+          sha256sum dist/usage-telemetry-agent > dist/usage-telemetry-agent.sha256
+
+      - name: Prove reproducible release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOTOOLCHAIN=local
+          export VERSION_OVERRIDE="$CANDIDATE_VERSION"
+          export COMMIT_OVERRIDE="$GITHUB_SHA"
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          scripts/package
+          artifact="dist/artifacts/usage-telemetry-agent-${CANDIDATE_VERSION}-linux-amd64.tar.xz"
+          test -f "$artifact"
+          cp "$artifact" dist/usage-telemetry-agent.first.tar.xz
+          scripts/package
+          cmp dist/usage-telemetry-agent.first.tar.xz "$artifact"
+          scripts/verify-artifact
+          sha256sum "$artifact" > dist/release-archive.sha256
+          mkdir -p dist/product-root
+          tar -xJf "$artifact" -C dist/product-root
+
+      - name: Run Go vulnerability analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOTOOLCHAIN=local
+          export GOBIN="$RUNNER_TEMP/security-tools"
+          mkdir -p "$GOBIN"
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          "$GOBIN/govulncheck" -json ./... > dist/govulncheck.json
+          if jq -s -e 'any(.[]; .finding?.trace[-1]?.function != null)' dist/govulncheck.json >/dev/null; then
+            echo 'govulncheck found a reachable vulnerable function' >&2
+            exit 1
+          fi
+
+      - name: Scan source and release product
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$TRIVY_IMAGE"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$TRIVY_CACHE:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" fs \
+              --scanners vuln,secret,misconfig,license \
+              --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+              --format json \
+              --output /workspace/dist/source-scan.json \
+              --skip-dirs /workspace/.git \
+              --skip-dirs /workspace/bin \
+              --skip-dirs /workspace/dist \
+              /workspace
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$TRIVY_CACHE:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" fs \
+              --scanners vuln \
+              --format cyclonedx \
+              --output /workspace/dist/source-sbom.cdx.json \
+              --skip-dirs /workspace/.git \
+              --skip-dirs /workspace/bin \
+              --skip-dirs /workspace/dist \
+              /workspace
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$TRIVY_CACHE:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" rootfs \
+              --scanners vuln,secret,license \
+              --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+              --format json \
+              --output /workspace/dist/product-scan.json \
+              /workspace/dist/product-root
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$TRIVY_CACHE:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" rootfs \
+              --scanners vuln \
+              --format cyclonedx \
+              --output /workspace/dist/product-sbom.cdx.json \
+              /workspace/dist/product-root
+
+      - name: Enforce the recorded security result
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          def count(path):
+              report = json.loads(Path(path).read_text(encoding='utf-8'))
+              critical = high = secrets = misconfiguration_critical = misconfiguration_high = 0
+              for result in report.get('Results') or []:
+                  for vulnerability in result.get('Vulnerabilities') or []:
+                      severity = vulnerability.get('Severity')
+                      critical += severity == 'CRITICAL'
+                      high += severity == 'HIGH'
+                  for misconfiguration in result.get('Misconfigurations') or []:
+                      severity = misconfiguration.get('Severity')
+                      misconfiguration_critical += severity == 'CRITICAL'
+                      misconfiguration_high += severity == 'HIGH'
+                  secrets += len(result.get('Secrets') or [])
+              return {
+                  'critical': critical,
+                  'high': high,
+                  'misconfiguration_critical': misconfiguration_critical,
+                  'misconfiguration_high': misconfiguration_high,
+                  'secrets': secrets,
+              }
+
+          counts = {
+              'source': count('dist/source-scan.json'),
+              'product': count('dist/product-scan.json'),
+          }
+          Path('dist/security-counts.json').write_text(
+              json.dumps(counts, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(counts, indent=2))
+          if any(
+              values[key]
+              for values in counts.values()
+              for key in (
+                  'critical',
+                  'high',
+                  'misconfiguration_critical',
+                  'misconfiguration_high',
+                  'secrets',
+              )
+          ):
+              raise SystemExit(1)
+          PY
+          test "$(cat dist/source-revision.txt)" = "$GITHUB_SHA"
+          test "$(jq -r '.bomFormat' dist/source-sbom.cdx.json)" = 'CycloneDX'
+          test "$(jq -r '.bomFormat' dist/product-sbom.cdx.json)" = 'CycloneDX'
+
+      - name: Record evidence checksums
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          find dist -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
+
+      - name: Upload short-lived security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: usage-telemetry-agent-security-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
+
+      - name: Remove verification-only cache
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d "$TRIVY_CACHE" ]]; then
+            docker run --rm \
+              --entrypoint sh \
+              -e CACHE_UID="$(id -u)" \
+              -e CACHE_GID="$(id -g)" \
+              -v "$TRIVY_CACHE:/root/.cache/trivy" \
+              "$TRIVY_IMAGE" \
+              -c 'chown -R "$CACHE_UID:$CACHE_GID" /root/.cache/trivy'
+            rm -rf -- "$TRIVY_CACHE"
+          fi
+          docker image rm "$TRIVY_IMAGE" >/dev/null 2>&1 || true

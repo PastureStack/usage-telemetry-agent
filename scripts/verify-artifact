@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# PastureStack deterministic artifact verification.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "${repo_root}/scripts/version"
+version="${VERSION#v}"
+arch="${ARCH:-amd64}"
+artifact="${repo_root}/dist/artifacts/usage-telemetry-agent-${version}-linux-${arch}.tar.xz"
+
+if [[ ! -f "${artifact}" ]]; then
+    "${repo_root}/scripts/package"
+fi
+
+work_root="$(mktemp -d)"
+cleanup()
+{
+    rm -rf "${work_root}"
+}
+trap cleanup EXIT
+
+tar -xJf "${artifact}" -C "${work_root}"
+expected_entries="$(cat <<'EOF'
+usage-telemetry-agent
+usage-telemetry-agent-LICENSES.txt
+usage-telemetry-agent-PRIVACY.md
+usage-telemetry-agent-SOURCES.txt
+usage-telemetry-agent-THIRD-PARTY-NOTICES.md
+EOF
+)"
+actual_entries="$(tar -tJf "${artifact}" | sort)"
+test "${actual_entries}" = "${expected_entries}"
+test -x "${work_root}/usage-telemetry-agent"
+grep -F 'Apache License' "${work_root}/usage-telemetry-agent-LICENSES.txt" >/dev/null
+grep -F 'Redistribution and use in source and binary forms' \
+    "${work_root}/usage-telemetry-agent-LICENSES.txt" >/dev/null
+grep -F 'Latest preserved upstream boundary: 83df963051f33520dda867e6e882afa277b62cbc' \
+    "${work_root}/usage-telemetry-agent-SOURCES.txt" >/dev/null
+grep -F "Release source commit: ${COMMIT}" \
+    "${work_root}/usage-telemetry-agent-SOURCES.txt" >/dev/null
+grep -F 'External publishing is off by default.' \
+    "${work_root}/usage-telemetry-agent-PRIVACY.md" >/dev/null
+
+test "$(sha256sum "${repo_root}/bin/usage-telemetry-agent" | cut -d' ' -f1)" = \
+     "$(sha256sum "${work_root}/usage-telemetry-agent" | cut -d' ' -f1)"
+"${work_root}/usage-telemetry-agent" --version | grep -F "${VERSION} (${COMMIT})"
+if ldd "${work_root}/usage-telemetry-agent" >/dev/null 2>&1; then
+    printf 'The executable is dynamically linked.\n' >&2
+    exit 1
+fi
+
+printf 'Verified %s\n' "$(basename "${artifact}")"

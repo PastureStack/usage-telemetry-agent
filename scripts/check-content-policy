@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# PastureStack public-content boundary: legal compatibility only, no local data.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+export PASTURESTACK_CONTENT_POLICY_ROOT="${repo_root}"
+
+python3 - <<'PY'
+from __future__ import annotations
+
+import os
+import re
+import sys
+from pathlib import Path
+
+
+root = Path(os.environ["PASTURESTACK_CONTENT_POLICY_ROOT"])
+excluded_roots = {".git", "bin", "dist", ".cache"}
+legacy_brand = ("ran" + "cher").casefold()
+legacy_protocol = ("cat" + "tle").casefold()
+legacy_allowed = {
+    "COMPATIBILITY.md",
+    "ORIGIN.md",
+    "README.md",
+    "THIRD-PARTY-NOTICES.md",
+    "integration/fixture_api.py",
+    "internal/agent/collect.go",
+    "internal/agent/collect_test.go",
+    "internal/agent/config.go",
+    "internal/agent/config_test.go",
+    "scripts/integration-test",
+    "scripts/package",
+}
+
+generic_forbidden = {
+    "Windows user profile path": re.compile(r"[A-Za-z]:\\Users\\", re.IGNORECASE),
+    "macOS user profile path": re.compile(r"/Users/[^/\s]+", re.IGNORECASE),
+    "Linux user profile path": re.compile(r"/home/[^/\s]+", re.IGNORECASE),
+    "RFC1918 address": re.compile(
+        r"\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|"
+        r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b"
+    ),
+    "personal mailbox domain": re.compile(
+        r"@[A-Za-z0-9._%+-]*(?:gmail|hotmail|outlook|yahoo)\.[A-Za-z]{2,}",
+        re.IGNORECASE,
+    ),
+    "Han character in public English source": re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]"),
+}
+
+private_literals: list[str] = []
+pattern_path = os.environ.get("PASTURESTACK_PRIVATE_PATTERN_FILE", "").strip()
+if pattern_path:
+    candidate = Path(pattern_path).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        pass
+    else:
+        raise SystemExit("The private pattern file must remain outside the public repository")
+    private_literals = [
+        line.strip().casefold()
+        for line in candidate.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+failures: list[str] = []
+for path in sorted(root.rglob("*")):
+    if not path.is_file() or any(part in excluded_roots for part in path.relative_to(root).parts):
+        continue
+    relative = path.relative_to(root).as_posix()
+    payload = path.read_bytes()
+    if b"\x00" in payload:
+        continue
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        failures.append(f"{relative}: not valid UTF-8")
+        continue
+    folded = text.casefold()
+    if (legacy_brand in folded or legacy_protocol in folded) and relative not in legacy_allowed:
+        failures.append(f"{relative}: legacy name outside the legal/compatibility allowlist")
+    if relative != "scripts/check-content-policy":
+        for label, pattern in generic_forbidden.items():
+            match = pattern.search(text)
+            if match:
+                line = text.count("\n", 0, match.start()) + 1
+                failures.append(f"{relative}:{line}: {label}")
+    for literal in private_literals:
+        if literal in folded:
+            failures.append(f"{relative}: matched a private local-only literal")
+
+if failures:
+    print("PUBLIC_CONTENT_POLICY_FAILED", file=sys.stderr)
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    raise SystemExit(1)
+print("PUBLIC_CONTENT_POLICY_OK")
+PY

@@ -1,10 +1,7 @@
-/.dapper
-/bin
-*.swp
-/.trash-cache
-/.idea
-/build
-/dist
-/telemetry
-/.existing
-node_modules
+# Modified by PastureStack in 2026: local build and test outputs only.
+/bin/
+/dist/
+/.cache/
+__pycache__/
+*.py[cod]
+*.test

@@ -1,19 +1,43 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# PastureStack formatting, module-boundary, and static-analysis gates.
+set -euo pipefail
 
-cd $(dirname $0)/..
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "${repo_root}"
+source "${repo_root}/scripts/toolchain"
 
-echo Running validation
-
-PACKAGES="$(go list ./...)"
-
-if ! command -v golangci-lint; then
-    echo Skipping validation: no golangci-lint available
-    exit
+go_version="$(GOTOOLCHAIN=local go env GOVERSION)"
+if [[ "${go_version}" != "go${GO_VERSION}" ]]; then
+    printf 'Go %s is required; found %s\n' "${GO_VERSION}" "${go_version}" >&2
+    exit 1
+fi
+python_version="$(python3 --version)"
+if [[ "${python_version}" != "Python ${PYTHON_VERSION}" ]]; then
+    printf 'Python %s is required; found %s\n' "${PYTHON_VERSION}" "${python_version}" >&2
+    exit 1
 fi
 
-echo Running: golangci-lint
-golangci-lint run
+mapfile -t unformatted < <(find . \
+    -path './bin' -prune -o \
+    -path './dist' -prune -o \
+    -name '*.go' -type f -print | sort | xargs gofmt -l)
+if (( ${#unformatted[@]} > 0 )); then
+    printf 'Unformatted Go source:\n%s\n' "${unformatted[@]}" >&2
+    exit 1
+fi
 
-echo Running: go fmt
-test -z "$(go fmt ${PACKAGES} | tee /dev/stderr)"
+GOTOOLCHAIN=local CGO_ENABLED=0 go vet ./...
+python_cache="$(mktemp -d)"
+cleanup()
+{
+    rm -rf -- "${python_cache}"
+}
+trap cleanup EXIT
+PYTHONPYCACHEPREFIX="${python_cache}" python3 -m compileall -q integration
+if [[ "$(GOTOOLCHAIN=local go list -m all | wc -l)" != "1" ]]; then
+    printf 'Unexpected third-party Go module dependency detected.\n' >&2
+    GOTOOLCHAIN=local go list -m all >&2
+    exit 1
+fi
+
+"${repo_root}/scripts/check-content-policy"

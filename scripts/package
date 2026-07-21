@@ -1,19 +1,71 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# PastureStack deterministic flat GitHub Release asset.
+set -euo pipefail
 
-source $(dirname $0)/version
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+source "${repo_root}/scripts/version"
+source "${repo_root}/scripts/toolchain"
 
-cd $(dirname $0)/..
-
-mkdir -p dist/artifacts
-cp bin/telemetry-${ARCH} bin/telemetry
-cp bin/telemetry-${ARCH} dist/artifacts/
-
-IMAGE=${REPO}/telemetry:${TAG}
-DOCKERFILE=package/Dockerfile
-if [ -e ${DOCKERFILE}.${ARCH} ]; then
-    DOCKERFILE=${DOCKERFILE}.${ARCH}
+if [[ "${ALLOW_DIRTY:-0}" != "1" ]] && [[ -n "$(git -C "${repo_root}" status --porcelain --untracked-files=all)" ]]; then
+    printf 'Refusing to package a dirty source tree.\n' >&2
+    exit 1
 fi
 
-docker build -f ${DOCKERFILE} -t ${IMAGE} .
-echo Built ${IMAGE}
+binary="${repo_root}/bin/usage-telemetry-agent"
+if [[ ! -x "${binary}" ]]; then
+    "${repo_root}/scripts/build"
+fi
+
+version="${VERSION#v}"
+arch="${ARCH:-amd64}"
+artifact="usage-telemetry-agent-${version}-linux-${arch}.tar.xz"
+source_date_epoch="${SOURCE_DATE_EPOCH:-0}"
+package_root="$(mktemp -d)"
+cleanup()
+{
+    rm -rf "${package_root}"
+}
+trap cleanup EXIT
+
+mkdir -p "${repo_root}/dist/artifacts"
+install -m 0755 "${binary}" "${package_root}/usage-telemetry-agent"
+install -m 0644 "${repo_root}/THIRD-PARTY-NOTICES.md" \
+    "${package_root}/usage-telemetry-agent-THIRD-PARTY-NOTICES.md"
+install -m 0644 "${repo_root}/PRIVACY.md" \
+    "${package_root}/usage-telemetry-agent-PRIVACY.md"
+
+cat >"${package_root}/usage-telemetry-agent-SOURCES.txt" <<EOF
+PastureStack source: https://github.com/PastureStack/usage-telemetry-agent
+Release source commit: ${COMMIT}
+Upstream source: https://github.com/rancher/telemetry
+Latest preserved upstream boundary: 83df963051f33520dda867e6e882afa277b62cbc
+Legacy v1.6 client reference: 71cd4522b3f1c716597b2715dc52f8f2a6827026
+Runtime dependencies: Go ${GO_VERSION} standard library only
+EOF
+printf '\n' >>"${package_root}/usage-telemetry-agent-SOURCES.txt"
+cat "${repo_root}/ORIGIN.md" >>"${package_root}/usage-telemetry-agent-SOURCES.txt"
+
+licenses="${package_root}/usage-telemetry-agent-LICENSES.txt"
+: >"${licenses}"
+printf '===== Usage Telemetry Agent — Apache-2.0 =====\n\n' >>"${licenses}"
+cat "${repo_root}/LICENSE" >>"${licenses}"
+printf '\n\n===== Go standard library — BSD 3-Clause =====\n\n' >>"${licenses}"
+cat "$(GOTOOLCHAIN=local go env GOROOT)/LICENSE" >>"${licenses}"
+printf '\n' >>"${licenses}"
+
+rm -f "${repo_root}/dist/artifacts/${artifact}"
+XZ_OPT=-9e tar \
+    --sort=name \
+    --mtime="@${source_date_epoch}" \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    -C "${package_root}" \
+    -cJf "${repo_root}/dist/artifacts/${artifact}" \
+    usage-telemetry-agent \
+    usage-telemetry-agent-LICENSES.txt \
+    usage-telemetry-agent-PRIVACY.md \
+    usage-telemetry-agent-SOURCES.txt \
+    usage-telemetry-agent-THIRD-PARTY-NOTICES.md
+
+sha256sum "${repo_root}/dist/artifacts/${artifact}"

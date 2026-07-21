@@ -1,23 +1,25 @@
-TARGETS := $(shell ls scripts)
+# Modified by PastureStack in 2026: exact-toolchain build and release gates.
+.PHONY: all build test validate integration-test package verify-artifact clean
 
-.dapper:
-	@echo Downloading dapper
-	@curl -sL https://releases.rancher.com/dapper/latest/dapper-`uname -s`-`uname -m` > .dapper.tmp
-	@@chmod +x .dapper.tmp
-	@./.dapper.tmp -v
-	@mv .dapper.tmp .dapper
+all: validate test build
 
-$(TARGETS): .dapper
-	./.dapper $@
+build:
+	./scripts/build
 
-trash: .dapper
-	./.dapper -m bind trash
+test:
+	./scripts/test
 
-trash-keep: .dapper
-	./.dapper -m bind trash -k
+validate:
+	./scripts/validate
 
-deps: trash
+integration-test: build
+	./scripts/integration-test
 
-.DEFAULT_GOAL := ci
+package: build
+	./scripts/package
 
-.PHONY: $(TARGETS)
+verify-artifact: package
+	./scripts/verify-artifact
+
+clean:
+	rm -rf bin dist

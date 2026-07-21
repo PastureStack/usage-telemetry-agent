@@ -1,28 +1,19 @@
-#!/bin/bash
-set -x
+#!/usr/bin/env bash
+# PastureStack release identity for deterministic local and VM builds.
 
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-    DIRTY="-dirty"
-fi
-
-COMMIT=$(git rev-parse --short HEAD)
-GIT_TAG=${DRONE_TAG:-$(git tag -l --contains HEAD | head -n 1)}
-
-if [[ -z "$DIRTY" && -n "$GIT_TAG" ]]; then
-    VERSION=$GIT_TAG
+VERSION="${VERSION_OVERRIDE:-0.4.1}"
+if [[ -n "${COMMIT_OVERRIDE:-}" ]]; then
+    COMMIT="${COMMIT_OVERRIDE}"
 else
-    VERSION="${COMMIT}${DIRTY}"
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    COMMIT="$(git -C "${repo_root}" rev-parse HEAD)"
 fi
 
-if [ -z "$ARCH" ]; then
-    ARCH=amd64
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf 'Invalid release version: %s\n' "${VERSION}" >&2
+    return 1 2>/dev/null || exit 1
 fi
-
-SUFFIX="-${ARCH}"
-
-TAG=${TAG:-${VERSION}${SUFFIX}}
-REPO=${REPO:-rancher}
-
-if echo $TAG | grep -q dirty; then
-    TAG=dev
+if [[ ! "${COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'Invalid source commit: %s\n' "${COMMIT}" >&2
+    return 1 2>/dev/null || exit 1
 fi
