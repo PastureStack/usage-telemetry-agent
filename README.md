@@ -27,7 +27,7 @@ The later upstream cluster collector/server pipeline is intentionally not bundle
 
 ## Build and test
 
-On Linux with Go 1.26.6, Python 3.14.6, `bash`, `tar`, `xz`, and `curl`:
+On Linux with Go 1.27.0, Python 3.14.6, `bash`, `tar`, `xz`, and `curl`:
 
 ```sh
 make validate

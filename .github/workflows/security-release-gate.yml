@@ -45,12 +45,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/go1.26.6.linux-amd64.tar.gz"
+          archive="$RUNNER_TEMP/go1.27.0.linux-amd64.tar.gz"
           curl --fail --silent --show-error --location \
             --output "$archive" \
-            'https://go.dev/dl/go1.26.6.linux-amd64.tar.gz'
+            'https://go.dev/dl/go1.27.0.linux-amd64.tar.gz'
           printf '%s  %s\n' \
-            '708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89' \
+            '675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685' \
             "$archive" | sha256sum --check
           tar -C "$RUNNER_TEMP" -xzf "$archive"
           "$RUNNER_TEMP/go/bin/go" version
@@ -70,7 +70,7 @@ jobs:
           export GOTOOLCHAIN=local
           export VERSION_OVERRIDE="$CANDIDATE_VERSION"
           export COMMIT_OVERRIDE="$GITHUB_SHA"
-          test "$(go env GOVERSION)" = 'go1.26.6'
+          test "$(go env GOVERSION)" = 'go1.27.0'
           test "$(python3 --version)" = 'Python 3.14.6'
           make validate
           make test
