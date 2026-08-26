@@ -36,7 +36,8 @@ jobs:
           set -euo pipefail
           test -z "$(git status --porcelain)"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-list --count 83df963051f33520dda867e6e882afa277b62cbc..HEAD)" -eq 1
+          git merge-base --is-ancestor \
+            83df963051f33520dda867e6e882afa277b62cbc HEAD
           mkdir -p dist
           printf '%s\n' "$GITHUB_SHA" > dist/source-revision.txt
           docker version
