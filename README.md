@@ -8,6 +8,9 @@ PastureStack is an independent community effort to preserve, audit, and moderniz
 
 **Upstream:** [`rancher/telemetry`](https://github.com/rancher/telemetry). This GitHub fork preserves upstream history, authorship, dates, tags, and the Apache-2.0 license. PastureStack maintenance is consolidated into one commit after the latest preserved upstream boundary.
 
+The current public GitHub Release is
+[`v0.4.1`](https://github.com/PastureStack/usage-telemetry-agent/releases/tag/v0.4.1).
+
 ## Privacy model
 
 External publishing is disabled unless both of these independent conditions are true:
