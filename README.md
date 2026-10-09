@@ -27,7 +27,8 @@ The later upstream cluster collector/server pipeline is intentionally not bundle
 
 ## Build and test
 
-On Linux with Go 1.27.0, Python 3.14.6, `bash`, `tar`, `xz`, and `curl`:
+The current release candidate is `v0.4.2`; published tags and assets remain immutable.
+On Linux with Go 1.27.2, Python 3.14.6, `bash`, `tar`, `xz`, and `curl`:
 
 ```sh
 make validate
@@ -38,7 +39,7 @@ make integration-test
 
 `scripts/check-content-policy` rejects local profile paths, private-network addresses, personal mailbox domains, non-English public text, and legacy names outside the documented legal/compatibility boundary. Maintainers can supply additional local-only literal checks through `PASTURESTACK_PRIVATE_PATTERN_FILE`; that file must remain outside the repository.
 
-The runtime has no third-party Go module dependencies. `make package` produces the deterministic flat GitHub Release asset `usage-telemetry-agent-0.4.1-linux-amd64.tar.xz`. The matching Server release verifies the asset SHA-256 digest before installation; operators do not need an artifact mirror.
+The runtime has no third-party Go module dependencies. `make package` produces the deterministic flat GitHub Release asset `usage-telemetry-agent-0.4.2-linux-amd64.tar.xz`. The matching Server release verifies the new asset SHA-256 digest before installation; operators do not need an artifact mirror.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md), [SECURITY.md](SECURITY.md), [ORIGIN.md](ORIGIN.md), [MODIFICATIONS.md](MODIFICATIONS.md), and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
