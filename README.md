@@ -8,6 +8,12 @@ PastureStack is an independent community effort to preserve, audit, and moderniz
 
 **Upstream:** [`rancher/telemetry`](https://github.com/rancher/telemetry). This GitHub fork preserves upstream history, authorship, dates, tags, and the Apache-2.0 license. PastureStack maintenance is consolidated into one commit after the latest preserved upstream boundary.
 
+The current public GitHub Release is
+[`v0.4.1`](https://github.com/PastureStack/usage-telemetry-agent/releases/tag/v0.4.1).
+For published installations, use its
+`usage-telemetry-agent-0.4.1-linux-amd64.tar.xz` release asset; the candidate
+below is not a published replacement.
+
 ## Privacy model
 
 External publishing is disabled unless both of these independent conditions are true:
@@ -39,7 +45,7 @@ make integration-test
 
 `scripts/check-content-policy` rejects local profile paths, private-network addresses, personal mailbox domains, non-English public text, and legacy names outside the documented legal/compatibility boundary. Maintainers can supply additional local-only literal checks through `PASTURESTACK_PRIVATE_PATTERN_FILE`; that file must remain outside the repository.
 
-The runtime has no third-party Go module dependencies. `make package` produces the deterministic flat GitHub Release asset `usage-telemetry-agent-0.4.2-linux-amd64.tar.xz`. The matching Server release verifies the new asset SHA-256 digest before installation; operators do not need an artifact mirror.
+The runtime has no third-party Go module dependencies. Candidate `make package` produces the deterministic flat archive `usage-telemetry-agent-0.4.2-linux-amd64.tar.xz`; candidate publication and matching Server acceptance are not yet complete. The matching Server release must verify the new asset SHA-256 digest before installation, not a previous release's checksum; operators do not need an artifact mirror.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md), [SECURITY.md](SECURITY.md), [ORIGIN.md](ORIGIN.md), [MODIFICATIONS.md](MODIFICATIONS.md), and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
