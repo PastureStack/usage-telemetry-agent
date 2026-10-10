@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      CANDIDATE_VERSION: 0.4.1
+      CANDIDATE_VERSION: 0.4.2
       TRIVY_IMAGE: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
       TRIVY_CACHE: /tmp/pasturestack-usage-telemetry-trivy-cache
     steps:
@@ -46,12 +46,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/go1.27.0.linux-amd64.tar.gz"
+          archive="$RUNNER_TEMP/go1.27.2.linux-amd64.tar.gz"
           curl --fail --silent --show-error --location \
             --output "$archive" \
-            'https://go.dev/dl/go1.27.0.linux-amd64.tar.gz'
+            'https://go.dev/dl/go1.27.2.linux-amd64.tar.gz'
           printf '%s  %s\n' \
-            '675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685' \
+            'ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5' \
             "$archive" | sha256sum --check
           tar -C "$RUNNER_TEMP" -xzf "$archive"
           "$RUNNER_TEMP/go/bin/go" version
@@ -71,7 +71,7 @@ jobs:
           export GOTOOLCHAIN=local
           export VERSION_OVERRIDE="$CANDIDATE_VERSION"
           export COMMIT_OVERRIDE="$GITHUB_SHA"
-          test "$(go env GOVERSION)" = 'go1.27.0'
+          test "$(go env GOVERSION)" = 'go1.27.2'
           test "$(python3 --version)" = 'Python 3.14.6'
           make validate
           make test
