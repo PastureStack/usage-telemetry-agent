@@ -3,4 +3,4 @@ module github.com/PastureStack/usage-telemetry-agent
 
 go 1.26.0
 
-toolchain go1.27.0
+toolchain go1.27.3
