@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# PastureStack executable smoke test for compatibility and privacy boundaries.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+binary="${repo_root}/bin/usage-telemetry-agent"
+source "${repo_root}/scripts/toolchain"
+python_version="$(python3 --version)"
+if [[ "${python_version}" != "Python ${PYTHON_VERSION}" ]]; then
+    printf 'Python %s is required; found %s\n' "${PYTHON_VERSION}" "${python_version}" >&2
+    exit 1
+fi
+if [[ ! -x "${binary}" ]]; then
+    "${repo_root}/scripts/build"
+fi
+
+work_root="$(mktemp -d)"
+fixture_pid=''
+agent_pid=''
+cleanup()
+{
+    if [[ -n "${agent_pid}" ]]; then
+        kill "${agent_pid}" 2>/dev/null || true
+        wait "${agent_pid}" 2>/dev/null || true
+    fi
+    if [[ -n "${fixture_pid}" ]]; then
+        kill "${fixture_pid}" 2>/dev/null || true
+        wait "${fixture_pid}" 2>/dev/null || true
+    fi
+    rm -rf "${work_root}"
+}
+trap cleanup EXIT
+
+legacy_url_path="${work_root}/legacy-url-must-not-exist"
+legacy_received_path="${work_root}/legacy-payload-must-not-exist"
+FIXTURE_URL_PATH="${legacy_url_path}" \
+FIXTURE_RECEIVED_PATH="${legacy_received_path}" \
+    python3 "${repo_root}/integration/fixture_api.py" \
+        >"${work_root}/fixture-url-stream" 2>"${work_root}/fixture.log" &
+fixture_pid=$!
+
+for _ in $(seq 1 100); do
+    if [[ -s "${work_root}/fixture-url-stream" ]]; then
+        fixture_url="$(head -n 1 "${work_root}/fixture-url-stream" | tr -d '\r\n')"
+        if curl --silent --fail "${fixture_url}/ready" >/dev/null; then
+            break
+        fi
+    fi
+    if ! kill -0 "${fixture_pid}" 2>/dev/null; then
+        cat "${work_root}/fixture.log" >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+test -n "${fixture_url:-}"
+test ! -e "${legacy_url_path}"
+test ! -e "${legacy_received_path}"
+
+CATTLE_URL="${fixture_url}/v2-beta" \
+CATTLE_ACCESS_KEY='fixture-access' \
+CATTLE_SECRET_KEY='fixture-secret' \
+    "${binary}" client --once >"${work_root}/once.json"
+
+ONCE_PATH="${work_root}/once.json" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+payload = Path(os.environ["ONCE_PATH"]).read_text(encoding="utf-8")
+record = json.loads(payload)
+assert record["r"] == 1
+assert record["install"]["uid"] == "not-collected"
+assert record["host"]["kernel"] == {"6.8": 1}
+assert record["host"]["os"] == {"ubuntu": 1}
+for forbidden in (
+    "sensitive-fixture", "192.0.2.70", "fixture-access", "fixture-secret",
+    "private-image", "catalog://",
+):
+    assert forbidden not in payload, forbidden
+PY
+
+listen_address='127.0.0.1:18115'
+CATTLE_URL="${fixture_url}/v2-beta" \
+CATTLE_ACCESS_KEY='fixture-access' \
+CATTLE_SECRET_KEY='fixture-secret' \
+TELEMETRY_TO_URL="${fixture_url}/ingest" \
+    "${binary}" client --listen "${listen_address}" >"${work_root}/disabled.log" 2>&1 &
+agent_pid=$!
+
+for _ in $(seq 1 100); do
+    if curl --silent --fail "http://${listen_address}/healthz" >/dev/null 2>&1; then
+        break
+    fi
+    if ! kill -0 "${agent_pid}" 2>/dev/null; then
+        cat "${work_root}/disabled.log" >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+curl --silent --show-error --fail -X POST \
+    "http://${listen_address}/v1-telemetry/report" >"${work_root}/disabled-report.json"
+grep -F 'publishing-disabled' "${work_root}/disabled-report.json" >/dev/null
+sleep 0.1
+received_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --user 'fixture-access:fixture-secret' "${fixture_url}/received")"
+test "${received_status}" = "404"
+kill "${agent_pid}"
+wait "${agent_pid}" 2>/dev/null || true
+agent_pid=''
+
+listen_address='127.0.0.1:18116'
+CATTLE_URL="${fixture_url}/v2-beta" \
+CATTLE_ACCESS_KEY='fixture-access' \
+CATTLE_SECRET_KEY='fixture-secret' \
+    "${binary}" client \
+        --listen "${listen_address}" \
+        --target-url "${fixture_url}/ingest" >"${work_root}/enabled.log" 2>&1 &
+agent_pid=$!
+
+for _ in $(seq 1 100); do
+    if curl --silent --fail "http://${listen_address}/healthz" >/dev/null 2>&1; then
+        break
+    fi
+    if ! kill -0 "${agent_pid}" 2>/dev/null; then
+        cat "${work_root}/enabled.log" >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+curl --silent --show-error --fail -X POST \
+    "http://${listen_address}/v1-telemetry/report" >/dev/null
+for _ in $(seq 1 100); do
+    if curl --silent --show-error --fail \
+        --user 'fixture-access:fixture-secret' \
+        --output "${work_root}/received.json" \
+        "${fixture_url}/received"; then
+        break
+    fi
+    sleep 0.05
+done
+test -s "${work_root}/received.json"
+test ! -e "${legacy_url_path}"
+test ! -e "${legacy_received_path}"
+
+RECEIVED_PATH="${work_root}/received.json" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+payload = Path(os.environ["RECEIVED_PATH"]).read_text(encoding="utf-8")
+record = json.loads(payload)
+assert record["r"] == 1
+for forbidden in (
+    "sensitive-fixture", "192.0.2.70", "fixture-access", "fixture-secret",
+    "private-image", "catalog://",
+):
+    assert forbidden not in payload, forbidden
+PY
+
+printf 'Executable integration test passed.\n'

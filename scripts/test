@@ -1,8 +1,22 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# PastureStack isolated unit, coverage, and race tests.
+set -euo pipefail
 
-cd $(dirname $0)/..
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "${repo_root}"
+source "${repo_root}/scripts/toolchain"
 
-echo Running tests
+go_version="$(GOTOOLCHAIN=local go env GOVERSION)"
+if [[ "${go_version}" != "go${GO_VERSION}" ]]; then
+    printf 'Go %s is required; found %s\n' "${GO_VERSION}" "${go_version}" >&2
+    exit 1
+fi
+python_version="$(python3 --version)"
+if [[ "${python_version}" != "Python ${PYTHON_VERSION}" ]]; then
+    printf 'Python %s is required; found %s\n' "${PYTHON_VERSION}" "${python_version}" >&2
+    exit 1
+fi
 
-go test -cover -tags=test ./...
+GOTOOLCHAIN=local CGO_ENABLED=0 go test -count=1 -cover ./...
+GOTOOLCHAIN=local CGO_ENABLED=1 go test -count=1 -race ./...
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v integration.test_fixture_api
