@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      CANDIDATE_VERSION: 0.4.3
+      CANDIDATE_VERSION: 0.4.4
       TRIVY_IMAGE: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
       TRIVY_CACHE: /tmp/pasturestack-usage-telemetry-trivy-cache
     steps:
@@ -72,7 +72,7 @@ jobs:
           export VERSION_OVERRIDE="$CANDIDATE_VERSION"
           export COMMIT_OVERRIDE="$GITHUB_SHA"
           test "$(go env GOVERSION)" = 'go1.27.3'
-          test "$(python3 --version)" = 'Python 3.14.6'
+          test "$(python3 --version)" = 'Python 3.14.9'
           make validate
           make test
           make build

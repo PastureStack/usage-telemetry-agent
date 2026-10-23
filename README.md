@@ -10,7 +10,7 @@ PastureStack is an independent community effort to preserve, audit, and moderniz
 
 Published versions and immutable assets are listed in
 [GitHub Releases](https://github.com/PastureStack/usage-telemetry-agent/releases/latest).
-The maintenance source builds `v0.4.3` with Go 1.27.3, including the
+The maintenance source builds `v0.4.4` with Go 1.27.3, including the
 [crypto/x509 mitigation for CVE-2026-111943](https://pkg.go.dev/vuln/GO-2026-6809).
 Source identity, publication, and matching Server acceptance are separate checks.
 
@@ -34,7 +34,7 @@ The later upstream cluster collector/server pipeline is intentionally not bundle
 ## Build and test
 
 Published tags and assets remain immutable.
-On Linux with Go 1.27.3, Python 3.14.6, `bash`, `tar`, `xz`, and `curl`:
+On Linux with Go 1.27.3, Python 3.14.9, `bash`, `tar`, `xz`, and `curl`:
 
 ```sh
 make validate
@@ -45,10 +45,14 @@ make integration-test
 
 `scripts/check-content-policy` rejects local profile paths, private-network addresses, personal mailbox domains, non-English public text, and legacy names outside the documented legal/compatibility boundary. Maintainers can supply additional local-only literal checks through `PASTURESTACK_PRIVATE_PATTERN_FILE`; that file must remain outside the repository.
 
-The runtime has no third-party Go module dependencies. `make package` produces the deterministic flat archive `usage-telemetry-agent-0.4.3-linux-amd64.tar.xz`. Use only the immutable asset from its matching published GitHub Release; a source version is not proof of publication. The matching Server release must verify that asset's SHA-256 digest before installation, not a previous release's checksum; operators do not need an artifact mirror.
+The runtime has no third-party Go module dependencies. `make package` produces the deterministic flat archive `usage-telemetry-agent-0.4.4-linux-amd64.tar.xz`. Use only the immutable asset from its matching published GitHub Release; a source version is not proof of publication. The matching Server release must verify that asset's SHA-256 digest before installation, not a previous release's checksum; operators do not need an artifact mirror.
 
 See [COMPATIBILITY.md](COMPATIBILITY.md), [SECURITY.md](SECURITY.md), [ORIGIN.md](ORIGIN.md), [MODIFICATIONS.md](MODIFICATIONS.md), and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## License and attribution
 
 The inherited project remains licensed under the [Apache License 2.0](LICENSE). Copyright and attribution for inherited work remain with their respective authors and contributors. PastureStack contributors claim authorship only for their own changes.
+
+## October 2026 security maintenance
+
+Maintained Go builds select the patched Go 1.27.3 compiler without raising the existing Go language requirement. Python tooling uses the patched pip/CA path; CI interpreter pins remain on the Python 3.14 series. Release artifacts must pass the repository's existing checks before publication.
