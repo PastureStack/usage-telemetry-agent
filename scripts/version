@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PastureStack release identity for deterministic local and VM builds.
 
-VERSION="${VERSION_OVERRIDE:-0.4.4}"
+VERSION="${VERSION_OVERRIDE:-0.4.5}"
 if [[ -n "${COMMIT_OVERRIDE:-}" ]]; then
     COMMIT="${COMMIT_OVERRIDE}"
 else
